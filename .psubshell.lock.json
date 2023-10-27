@@ -1,0 +1,7 @@
+{
+  "modules": {
+    "InvokeBuild": {
+      "Version": "5.10.4"
+    }
+  }
+}
