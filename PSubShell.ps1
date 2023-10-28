@@ -2,21 +2,21 @@
 
 <#PSScriptInfo
 
-.VERSION 0.1.0
+.VERSION 0.2.0
 
 .GUID dbd31207-825d-4cdc-8e52-7c575e0ca5d9
 
-.AUTHOR wekem
+.AUTHOR William E. Kempf
 
 .COMPANYNAME
 
-.COPYRIGHT
+.COPYRIGHT Copyright (c) 2023 William E. Kempf. All rights reserved.
 
-.TAGS
+.TAGS InvokeBuild, shell, dependencies
 
-.LICENSEURI
+.LICENSEURI https://github.com/wekempf/PSubShell/blob/main/LICENSE
 
-.PROJECTURI
+.PROJECTURI https://github.com/wekempf/PSubShell/
 
 .ICONURI
 
