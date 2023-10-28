@@ -2,7 +2,7 @@
 
 <#PSScriptInfo
 
-.VERSION 1.0
+.VERSION 0.1.0
 
 .GUID dbd31207-825d-4cdc-8e52-7c575e0ca5d9
 
@@ -59,15 +59,27 @@ Param(
     [Parameter(ParameterSetName = 'AddModule')]
     [switch]$AddModule,
 
+    [Parameter(ParameterSetName = 'RemoveModule')]
+    [switch]$RemoveModule,
+
     [Parameter(ParameterSetName = 'AddScript')]
     [switch]$AddScript,
+
+    [Parameter(ParameterSetName = 'RemoveScript')]
+    [switch]$RemoveScript,
 
     [Parameter(ParameterSetName = 'AddPackage')]
     [switch]$AddPackage,
 
+    [Parameter(ParameterSetName = 'RemovePackage')]
+    [switch]$RemovePackage,
+
     [Parameter(ParameterSetName = 'AddModule', Position = 1, Mandatory)]
+    [Parameter(ParameterSetName = 'RemoveModule', Position = 1, Mandatory)]
     [Parameter(ParameterSetName = 'AddScript', Position = 1, Mandatory)]
+    [Parameter(ParameterSetName = 'RemoveScript', Position = 1, Mandatory)]
     [Parameter(ParameterSetName = 'AddPackage', Position = 1, Mandatory)]
+    [Parameter(ParameterSetName = 'RemovePackage', Position = 1, Mandatory)]
     [string]$Name,
 
     [Parameter(ParameterSetName = 'AddModule')]
@@ -138,7 +150,7 @@ switch ($PSCmdlet.ParameterSetName) {
             Write-Error 'Cannot enter PSubShell from within PSubShell.'
             return
         }
-        $pssubshellscript = Join-Path $env:TEMP ((Get-Item .).Name + '.ps1')
+        $pssubshellscript = Join-Path ([IO.Path]::GetTempPath()) ((Get-Item .).Name + '.ps1')
         Set-Content $pssubshellscript @"
 Set-Variable -Name Old -Value `$ErrorActionPreference -Scope Global
 `$ErrorActionPreference = 'SilentlyContinue'
@@ -219,6 +231,11 @@ Remove-Variable -Name Old -Scope Global
         ConvertTo-Json $PSubShellVersions | Set-Content $PSubShellLockFile
     }
 
+    'RemoveModule' {
+        $PSubShellVersions.modules.Remove($Name)
+        ConvertTo-Json $PSubShellVersions | Set-Content $PSubShellLockFile
+    }
+
     'AddScript' {
         $parms = *GetParameters $PSBoundParameters -Exclude 'AddScript'
         $script = Find-Script -ErrorAction Stop @parms
@@ -231,6 +248,11 @@ Remove-Variable -Name Old -Scope Global
         ConvertTo-Json $PSubShellVersions | Set-Content $PSubShellLockFile
     }
 
+    'RemoveScript' {
+        $PSubShellVersions.scripts.Remove($Name)
+        ConvertTo-Json $PSubShellVersions | Set-Content $PSubShellLockFile
+    }
+
     'AddPackage' {
         $parms = *GetParameters $PSBoundParameters -Exclude 'AddPackage'
         $package = Find-Package -ErrorAction Stop @parms
@@ -240,6 +262,11 @@ Remove-Variable -Name Old -Scope Global
             $PSubShellVersions.packages = @{}
         }
         $PSubShellVersions.packages.$Name = $parms
+        ConvertTo-Json $PSubShellVersions | Set-Content $PSubShellLockFile
+    }
+
+    'RemovePackage' {
+        $PSubShellVersions.packages.Remove($Name)
         ConvertTo-Json $PSubShellVersions | Set-Content $PSubShellLockFile
     }
 
@@ -283,6 +310,7 @@ Remove-Variable -Name Old -Scope Global
         Set-Content -Path $Path -Value @"
 param(
     [Parameter(Position = 0)]
+    [ValidateSet('?', '.')]
     [string[]]$Tasks
 )
 

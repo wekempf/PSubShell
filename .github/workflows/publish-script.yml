@@ -1,0 +1,19 @@
+name: Publish PSubShell.ps1
+run-name: ${{ github.actor }} is publishing PSubShell.ps1 🚀
+on: [push]
+jobs:
+  build:
+    name: Run build.ps1 build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: |
+          ./build.ps1 build
+        shell: pwsh
+      - name: Publish
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ./build.ps1 publish
+        shell: pwsh
