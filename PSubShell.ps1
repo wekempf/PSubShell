@@ -126,7 +126,7 @@ $PSubShellPath = Join-Path $PSScriptRoot '.psubshell'
 $PSubShellLockFile = Join-Path $PSScriptRoot '.psubshell.lock.json'
 if (Test-Path $PSubShellLockFile) {
     $PSubShellVersions = Get-Content $PSubShellLockFile -ErrorAction SilentlyContinue |
-        ConvertFrom-Json -AsHashtable
+    ConvertFrom-Json -AsHashtable
 }
 else {
     $PSubShellVersions = @{}
@@ -173,7 +173,7 @@ Remove-Variable -Name Old -Scope Global
             $parms = *GetParameters $version -Exclude 'Version', 'MinimumVersion', 'MaximumVersion'
             $parms.RequiredVersion = $version.Version
             $module = Get-Module -Name $name -ListAvailable -ErrorAction SilentlyContinue |
-                Where-Object { $_.Version -eq $version.Version }
+            Where-Object { $_.Version -eq $version.Version }
             if (-not $module) {
                 $module = Join-Path $PSubShellPath $name -AdditionalChildPath $version.Version, "$name.psd1"
                 if (-not (Test-Path $module)) {
@@ -307,7 +307,7 @@ Remove-Variable -Name Old -Scope Global
             return
         }
 
-        Set-Content -Path $Path -Value @"
+        Set-Content -Path $Path -Value @'
 param(
     [Parameter(Position = 0)]
     [ValidateSet('?', '.')]
@@ -324,6 +324,6 @@ if ($MyInvocation.ScriptName -notlike '*Invoke-Build.ps1') {
 }
 
 task . { Write-Build Green 'Hello world!' }
-"@        
+'@        
     }
 }
