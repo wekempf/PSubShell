@@ -1,0 +1,38 @@
+name: ci build
+run-name: ${{ github.actor }} is building 🚀
+on:
+  workflow_dispatch:
+
+  pull_request:
+    branches:
+      - "*"
+    paths:
+      - "PSubShell.ps1"
+      - "build.ps1"
+
+defaults:
+  run:
+    shell: pwsh
+
+env:
+  BuildDirectory: ${{ github.workspace }}/.build
+
+jobs:
+  build:
+    name: Run build.ps1 build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Run the build script to create the versioned script file
+      - name: Build
+        run: |
+          ./build.ps1 build
+
+      # Publish the script as an artifact, so it can be used in other jobs
+      - uses: actions/upload-artifact@v3
+        with:
+          name: PSubShell
+          if-no-files-found: error
+          retention-days: 7
+          path: ${{ env.BuildDirectory }}/PSubShell.ps1

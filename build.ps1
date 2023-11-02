@@ -4,7 +4,8 @@ param(
     [string[]]$Tasks,
 
     [string]$Repository = 'PSGallery',
-    [string]$NuGetApiKey = ([Environment]::GetEnvironmentVariable('NUGET_API_KEY'))
+    [string]$NuGetApiKey = ([Environment]::GetEnvironmentVariable('NUGET_API_KEY')),
+    [switch]$Release
 )
 
 if ($MyInvocation.ScriptName -notlike '*Invoke-Build.ps1') {
@@ -44,7 +45,7 @@ task version {
     }
     Write-Build Cyan $script:version
     $latestVersion = Find-Script $scriptName -Repository:$Repository -ErrorAction SilentlyContinue |
-        Select-Object -ExpandProperty Version
+    Select-Object -ExpandProperty Version
     if ($latestVersion -and ([System.Management.Automation.SemanticVersion]$latestVersion -ge [System.Management.Automation.SemanticVersion]$version)) {
         throw "Version $latestVersion already published. Bump version and try again."
     }
