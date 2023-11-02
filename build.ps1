@@ -4,8 +4,7 @@ param(
     [string[]]$Tasks,
 
     [string]$Repository = 'PSGallery',
-    [string]$NuGetApiKey = ([Environment]::GetEnvironmentVariable('NUGET_API_KEY')),
-    [switch]$Release
+    [string]$NuGetApiKey = ([Environment]::GetEnvironmentVariable('NUGET_API_KEY'))
 )
 
 if ($MyInvocation.ScriptName -notlike '*Invoke-Build.ps1') {
@@ -34,21 +33,45 @@ Set-BuildFooter {
     }
 }
 
+function semver($version) {
+    [System.Management.Automation.SemanticVersion]$version
+}
+
 $script:scriptName = 'PSubShell'
 $script:buildPath = Join-Path $PSScriptRoot '.build'
 
 task version {
-    $script:version = Test-ScriptFileInfo "$scriptName.ps1" | Select-Object -ExpandProperty Version
-    $branch = git rev-parse --abbrev-ref HEAD
-    if ($branch -ne 'main') {
-        $script:version = "$script:version-alpha$(git rev-list --count HEAD)"
+    $script:version = semver (Test-ScriptFileInfo "$scriptName.ps1" |
+        Select-Object -ExpandProperty Version)
+    $script:commits = git rev-list --count main..HEAD
+    if ($commits -ne 0) {
+        $script:version = semver "$script:version-alpha$commits"
+    }
+    $parms = @{
+        Name        = $scriptName
+        ErrorAction = 'SilentlyContinue'
+    }
+    if ($Repository) {
+        $parms.Repository = $Repository
+    }
+    $latestVersion = semver (
+        Find-Script @parms |
+        Select-Object -ExpandProperty Version)
+    if ($latestVersion) {
+        if ($latestVersion -ge $version) {
+            throw "Version $latestVersion already published. Bump version and try again."
+        }
+        $releaseVersion = semver "$($script:version.Major).$($script:version.Minor).$($script:version.Patch)"
+        $patchBump = semver "$($latestVersion.Major).$($latestVersion.Minor).$($latestVersion.Patch + 1)"
+        $minorBump = semver "$($latestVersion.Major).$($latestVersion.Minor + 1).0"
+        $majorBump = semver "$($latestVersion.Major + 1).0.0"
+        if (($releaseVersion -ne $patchBump) -and
+            ($releaseVersion -ne $minorBump) -and
+            ($releaseVersion -ne $majorBump)) {
+            throw "Invalid version bump. Update version to $patchBump, $minorBump, or $majorBump and try again."
+        }
     }
     Write-Build Cyan $script:version
-    $latestVersion = Find-Script $scriptName -Repository:$Repository -ErrorAction SilentlyContinue |
-    Select-Object -ExpandProperty Version
-    if ($latestVersion -and ([System.Management.Automation.SemanticVersion]$latestVersion -ge [System.Management.Automation.SemanticVersion]$version)) {
-        throw "Version $latestVersion already published. Bump version and try again."
-    }
 }
 
 task clean {
@@ -65,9 +88,8 @@ task publish {
     if (-not (Test-Path (Join-Path $buildPath "$scriptName.ps1"))) {
         throw "Build script not found. Run 'build' task first."
     }
-    $branch = git rev-parse --abbrev-ref HEAD
     $githubActions = [Environment]::GetEnvironmentVariable('GITHUB_ACTIONS')
-    if (($branch -ne 'main') -and $githubActions) {
+    if ($script:version.PreReleaseLabel -and $githubActions) {
         Write-Build Yellow 'Registering GitHub repository...'
         Register-PSRepository -Name GitHub `
             -SourceLocation 'https://nuget.pkg.github.com/wekempf/index.json' `
@@ -81,8 +103,9 @@ task publish {
     if (-not $NuGetApiKey) {
         throw 'NuGetApiKey parameter is required.'
     }
-    Publish-Script -Path (Join-Path $buildPath "$scriptName.ps1") -Repository $Repository -NuGetApiKey $NuGetApiKey
-    if (($branch -ne 'main') -and ([Environment]::GetEnvironmentVariable('GITHUB_ACTIONS'))) {
+    Publish-Script -Path (Join-Path $buildPath "$scriptName.ps1") `
+        -Repository $Repository -NuGetApiKey $NuGetApiKey
+    if ($script:version.PreReleaseLabel -and $githubActions) {
         Unregister-PSRepository -Name GitHub
     }
 }
