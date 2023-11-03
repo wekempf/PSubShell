@@ -42,7 +42,10 @@
 [CmdletBinding(DefaultParameterSetName = 'EnterShell')]
 Param(
     [Parameter(ParameterSetName = 'EnterShell', Position = 0)]
-    [object]$Command,
+    [string]$Command,
+
+    [Parameter(ParameterSetName = 'EnterShell', Position = 1)]
+    [hashtable]$Parameters,
 
     [Parameter(ParameterSetName = 'Initialize')]
     [switch]$Initialize,
@@ -56,61 +59,23 @@ Param(
     [Parameter(ParameterSetName = 'Update')]
     [switch]$Update,
 
-    [Parameter(ParameterSetName = 'AddModule')]
-    [switch]$AddModule,
+    [Parameter(ParameterSetName = 'AddResource')]
+    [string]$AddResource,
 
-    [Parameter(ParameterSetName = 'RemoveModule')]
-    [switch]$RemoveModule,
+    [Parameter(ParameterSetName = 'RemoveResource')]
+    [string]$RemoveResource,
 
-    [Parameter(ParameterSetName = 'AddScript')]
-    [switch]$AddScript,
+    [Parameter(ParameterSetName = 'AddResource')]
+    [string]$Version,
 
-    [Parameter(ParameterSetName = 'RemoveScript')]
-    [switch]$RemoveScript,
-
-    [Parameter(ParameterSetName = 'AddPackage')]
-    [switch]$AddPackage,
-
-    [Parameter(ParameterSetName = 'RemovePackage')]
-    [switch]$RemovePackage,
-
-    [Parameter(ParameterSetName = 'AddModule', Position = 1, Mandatory)]
-    [Parameter(ParameterSetName = 'RemoveModule', Position = 1, Mandatory)]
-    [Parameter(ParameterSetName = 'AddScript', Position = 1, Mandatory)]
-    [Parameter(ParameterSetName = 'RemoveScript', Position = 1, Mandatory)]
-    [Parameter(ParameterSetName = 'AddPackage', Position = 1, Mandatory)]
-    [Parameter(ParameterSetName = 'RemovePackage', Position = 1, Mandatory)]
-    [string]$Name,
-
-    [Parameter(ParameterSetName = 'AddModule')]
-    [Parameter(ParameterSetName = 'AddScript')]
-    [Parameter(ParameterSetName = 'AddPackage')]
-    [string]$MinimumVersion,
-
-    [Parameter(ParameterSetName = 'AddModule')]
-    [Parameter(ParameterSetName = 'AddScript')]
-    [Parameter(ParameterSetName = 'AddPackage')]
-    [string]$MaximumVersion,
-
-    [Parameter(ParameterSetName = 'AddModule')]
-    [Parameter(ParameterSetName = 'AddScript')]
-    [Parameter(ParameterSetName = 'AddPackage')]
-    [string]$RequiredVersion,
-
-    [Parameter(ParameterSetName = 'AddModule')]
-    [Parameter(ParameterSetName = 'AddScript')]
-    [Parameter(ParameterSetName = 'AddPackage')]
+    [Parameter(ParameterSetName = 'AddResource')]
     [string[]]$Repository,
 
-    [Parameter(ParameterSetName = 'AddModule')]
-    [Parameter(ParameterSetName = 'AddPackage')]
-    [Parameter(ParameterSetName = 'AddScript')]
-    [switch]$AllowPrerelease,
+    [Parameter(ParameterSetName = 'AddResource')]
+    [switch]$Prerelease,
 
-    [Parameter(ParameterSetName = 'AddModule')]
-    [Parameter(ParameterSetName = 'AddScript')]
-    [Parameter(ParameterSetName = 'AddPackage')]
-    [switch]$AcceptLicense,
+    [Parameter(ParameterSetName = 'AddResource')]
+    [switch]$TrustRepository,
 
     [Parameter(ParameterSetName = 'CreateBuildScript')]
     [switch]$CreateBuildScript,
@@ -122,17 +87,17 @@ Param(
     [switch]$Force
 )
 
-$PSubShellPath = Join-Path $PSScriptRoot '.psubshell'
-$PSubShellLockFile = Join-Path $PSScriptRoot '.psubshell.lock.json'
-if (Test-Path $PSubShellLockFile) {
-    $PSubShellVersions = Get-Content $PSubShellLockFile -ErrorAction SilentlyContinue |
-    ConvertFrom-Json -AsHashtable
+$PSubShell = @{
+    Path = Join-Path $PSScriptRoot '.psubshell'
+    DepsFile = Join-Path $PSScriptRoot '.psubshell.deps.json'
+    LockFile = Join-Path $PSScriptRoot '.psubshell.lock.json'
 }
-else {
-    $PSubShellVersions = @{}
-}
+$PSubShell.Deps = (Get-Content $PSubShell.DepsFile -ErrorAction SilentlyContinue |
+        ConvertFrom-Json -AsHashtable) ?? @{ }
+$PSubShell.Locks = (Get-Content $PSubShell.LockFile -ErrorAction SilentlyContinue |
+        ConvertFrom-Json -AsHashtable) ?? @{ }
 
-function *GetParameters([hashtable]$Given, [string[]]$Include, [string[]]$Exclude) {
+function script:GetParameters([hashtable]$Given, [string[]]$Include, [string[]]$Exclude) {
     $parms = @{}
     foreach ($kv in $Given.GetEnumerator()) {
         if ((-not $Include) -or ($Include -contains $kv.Key)) {
@@ -146,159 +111,100 @@ function *GetParameters([hashtable]$Given, [string[]]$Include, [string[]]$Exclud
 
 switch ($PSCmdlet.ParameterSetName) {
     'EnterShell' {
-        if ($PSubShellInstance -eq $PSubShellPath) {
-            Write-Error 'Cannot enter PSubShell from within PSubShell.'
+        if ($global:PSubShellInstance -eq $PSubShell.Path) {
+            Write-Error 'Cannot reenter the same PSubShell.'
             return
         }
-        $pssubshellscript = Join-Path ([IO.Path]::GetTempPath()) ((Get-Item .).Name + '.ps1')
-        Set-Content $pssubshellscript @"
-Set-Variable -Name Old -Value `$ErrorActionPreference -Scope Global
+        $script = Join-Path ([IO.Path]::GetTempPath()) ((Get-Item .).Name + '.ps1')
+        Set-Content $script @"
+Set-Variable -Name OldPSubShellErrorAction -Value `$ErrorActionPreference -Scope Global
 `$ErrorActionPreference = 'SilentlyContinue'
 $PSCommandPath -Initialize
-$Command
-`$PSubShell='$PSubShellPath'
-`$ErrorActionPreference = `$Old
+$Command $($Parameters.GetEnumerator() | ForEach-Object { "$($_.Key) $($_.Value)" } | Join-String ' ')
+`$PSubShellInstance = '$PSubShell.Path'
+`$ErrorActionPreference = `$OldPSubShellErrorAction
 Remove-Variable -Name Old -Scope Global
 "@
-        Invoke-Expression "pwsh -Interactive $(((-not $Command) -or $NoExit) ? '-NoExit' : '') $($NoProfile ? '-NoProfile' : '') -File $pssubshellscript"
+        Invoke-Expression "pwsh -Interactive $(((-not $Command) -or $NoExit) ? '-NoExit' : '') $($NoProfile ? '-NoProfile' : '') -File $script"
     }
 
     'Initialize' {
         Write-Host 'Initializing PSubShell...'
+        $env:PATH = (@($PSubShell.Path) + (
+                $env:PATH -split [IO.Path]::PathSeparator |
+                    Where-Object { $_ -ne "$PSubShell.Path" }
+            )) -join [IO.Path]::PathSeparator
+        $env:PSModulePath = (@($PSubShell.Path) + (
+                $env:PSModulePath -split [IO.Path]::PathSeparator |
+                    Where-Object { $_ -ne "$PSubShell.Path" }
+            )) -join [IO.Path]::PathSeparator
 
-        $modules = $PSubShellVersions.modules ?? @{}
-        foreach ($kv in $modules.GetEnumerator()) {
+        foreach ($kv in $PSubShell.Deps.GetEnumerator()) {
             $name = $kv.Key
-            $version = $kv.Value
-            $parms = *GetParameters $version -Exclude 'Version', 'MinimumVersion', 'MaximumVersion'
-            $parms.RequiredVersion = $version.Version
-            $module = Get-Module -Name $name -ListAvailable -ErrorAction SilentlyContinue |
-            Where-Object { $_.Version -eq $version.Version }
-            if (-not $module) {
-                $module = Join-Path $PSubShellPath $name -AdditionalChildPath $version.Version, "$name.psd1"
-                if (-not (Test-Path $module)) {
-                    New-Item -ItemType Directory -Path $PSubShellPath -Force | Out-Null
-                    Save-Module $name -Path $PSubShellPath -RequiredVersion $version.Version @parms
+            $type = $kv.Type
+            $parms = GetParameters $kv.Value -Exclude 'Type', 'Version'
+            $version = $PSubShell.Locks.$name.Version
+            $resource = Find-PSResource -Name $name -Version $version `
+                -ErrorAction SilentlyContinue @parms
+            if ($type -eq 'Package') {
+                $path = Join-Path $PSubShell.Path $name -AdditionalChildPath $version
+                if (-not (Test-Path $path)) {
+                    Save-PSResource -Name $name -Version $version -ErrorAction Continue `
+                        -Path $PSSubShell.Path @parms
+                }
+                $toolsPath = Join-Path $path 'tools'
+                if (Test-Path $toolsPath) {
+                    $env:PATH = (@($toolsPath) + (
+                            $env:PATH -split [IO.Path]::PathSeparator |
+                                Where-Object { $_ -ne "$toolsPath" }
+                        )) -join [IO.Path]::PathSeparator
                 }
             }
-            Import-Module $module -Force
-        }
-
-        $scripts = $PSubShellVersions.scripts ?? @{}
-        foreach ($kv in $scripts.GetEnumerator()) {
-            $name = $kv.Key
-            $version = $kv.Value
-            $script = Join-Path $PSubShellPath "$name.ps1"
-            $info = Test-ScriptFileInfo -Path $script -ErrorAction SilentlyContinue
-            if ((-not $info) -or ($info.Version -ne $version.Version)) {
-                $parms = *GetParameters $version -Exclude 'Version', 'MinimumVersion', 'MaximumVersion'
-                $parms.RequiredVersion = $version.Version
-                Save-Script $name -Path $PSubShellPath -Force @parms
-            }
-            Set-Alias -Name $name -Value $script -Scope Global
-            Write-Host "$(Get-Alias -Name $name)"
-        }
-
-        $packages = $PSubShellVersions.packages ?? @{}
-        foreach ($kv in $packages.GetEnumerator()) {
-            $name = $kv.Key
-            $version = $kv.Value
-            $package = Join-Path $PSubShellPath $name -AdditionalChildPath $version.Version
-            if (-not (Test-Path $package)) {
-                $parms = *GetParameters $version -Exclude 'Version', 'MinimumVersion', 'MaximumVersion'
-                $parms.RequiredVersion = $version.Version
-                Save-Package $name -Path $PSubShellPath -RequiredVersion $version.Version @parms | Out-Null
-                $nupkg = (Join-Path $PSubShellPath "$name.$($version.Version).nupkg")
-                Expand-Archive $nupkg $package -Force | Out-Null
-                Remove-Item $nupkg -Force
-            }
-            $tools = Join-Path $package 'tools'
-            if (Test-Path $tools) {
-                $env:PATH = "$tools$([IO.Path]::PathSeparator)$env:PATH"
+            else {
             }
         }
     }
 
-    'AddModule' {
-        $parms = *GetParameters $PSBoundParameters -Exclude 'AddModule'
-        $module = Find-Module -ErrorAction Stop @parms
-        $parms.Version = $module.Version
-        $parms.Remove('Name')
-        if (-not $PSubShellVersions.modules) {
-            $PSubShellVersions.modules = @{}
+    'AddResource' {
+        $name = $AddResource
+        $parms = GetParameters $PSBoundParameters -Exclude 'AddResource'
+        $resource = Find-PSResource -Name $name -ErrorAction Stop @parms |
+            Sort-Object -Property Version -Descending |
+            Select-Object -First 1
+        if (-not $resource) {
+            Write-Error "Unable to find resource '$Name'."
+            return
         }
-        $PSubShellVersions.modules.$Name = $parms
-        ConvertTo-Json $PSubShellVersions | Set-Content $PSubShellLockFile
-    }
-
-    'RemoveModule' {
-        $PSubShellVersions.modules.Remove($Name)
-        ConvertTo-Json $PSubShellVersions | Set-Content $PSubShellLockFile
-    }
-
-    'AddScript' {
-        $parms = *GetParameters $PSBoundParameters -Exclude 'AddScript'
-        $script = Find-Script -ErrorAction Stop @parms
-        $parms.Version = $script.Version
-        $parms.Remove('Name')
-        if (-not $PSubShellVersions.scripts) {
-            $PSubShellVersions.scripts = @{}
+        $parms.Type = $resource.Type.ToString() ?? 'Package'
+        $PSubShell.Deps.$name = $parms
+        $PSubShell.Locks.$name = @{
+            Type = $resource.Type.ToString() ?? 'Package'
+            Version = $resource.Version.ToString()
         }
-        $PSubShellVersions.scripts.$Name = $parms
-        ConvertTo-Json $PSubShellVersions | Set-Content $PSubShellLockFile
+        ConvertTo-Json $PSubShell.Deps | Set-Content $PSubShell.DepsFile
+        ConvertTo-Json $PSubShell.Locks | Set-Content $PSubShell.LockFile
     }
 
-    'RemoveScript' {
-        $PSubShellVersions.scripts.Remove($Name)
-        ConvertTo-Json $PSubShellVersions | Set-Content $PSubShellLockFile
-    }
-
-    'AddPackage' {
-        $parms = *GetParameters $PSBoundParameters -Exclude 'AddPackage'
-        $package = Find-Package -ErrorAction Stop @parms
-        $parms.Version = $package.Version
-        $parms.Remove('Name')
-        if (-not $PSubShellVersions.packages) {
-            $PSubShellVersions.packages = @{}
-        }
-        $PSubShellVersions.packages.$Name = $parms
-        ConvertTo-Json $PSubShellVersions | Set-Content $PSubShellLockFile
-    }
-
-    'RemovePackage' {
-        $PSubShellVersions.packages.Remove($Name)
-        ConvertTo-Json $PSubShellVersions | Set-Content $PSubShellLockFile
+    'RemoveResource' {
+        $PSubShell.Deps.Remove($RemoveResource)
+        $PSubShell.Locks.Remove($RemoveResource)
+        ConvertTo-Json $PSubShell.Deps | Set-Content $PSubShell.DepsFile
+        ConvertTo-Json $PSubShell.Locks | Set-Content $PSubShell.LockFile
     }
 
     'Update' {
-        $modules = $PSubShellVersions.modules ?? @{}
-        foreach ($kv in $modules.GetEnumerator()) {
+        foreach ($kv in $PSubShell.Deps.GetEnumerator()) {
             $name = $kv.Key
-            $version = $kv.Value
-            $parms = *GetParameters $version -Exclude 'Version'
-            $module = Find-Module $name -ErrorAction SilentlyContinue @parms
-            $PSubShellVersions.modules.$name.Version = $module.Version
+            $parms = $kv.Value
+            $resource = Find-PSResource -Name $name -ErrorAction SilentlyContinue @parms |
+                Sort-Object -Property Version -Descending |
+                Select-Object -First 1
+            $PSubShell.Locks.$name = @{
+                Type = $resource.Type.ToString() ?? 'Package'
+                Version = $resource.Version.ToString()
+            }
         }
-
-        $scripts = $PSubShellVersions.scripts ?? @{}
-        foreach ($kv in $scripts.GetEnumerator()) {
-            $name = $kv.Key
-            $version = $kv.Value
-            $parms = *GetParameters $version -Exclude 'Version'
-            $script = Find-Script $name -ErrorAction SilentlyContinue @parms
-            $PSubShellVersions.scripts.$name.Version = $script.Version
-        }
-
-        $packages = $PSubShellVersions.packages ?? @{}
-        foreach ($kv in $packages.GetEnumerator()) {
-            $name = $kv.Key
-            $version = $kv.Value
-            $parms = *GetParameters $version -Exclude 'Version'
-            $package = Find-Package $name -ErrorAction SilentlyContinue @parms
-            $PSubShellVersions.packages.$name.Version = $package.Version
-        }
-
-        ConvertTo-Json $PSubShellVersions | Set-Content $PSubShellLockFile
+        ConvertTo-Json $PSubShell.Locks | Set-Content $PSubShell.LockFile
     }
 
     'CreateBuildScript' {
@@ -315,11 +221,7 @@ param(
 )
 
 if ($MyInvocation.ScriptName -notlike '*Invoke-Build.ps1') {
-    $c = "Invoke-Build $($Tasks -join ',') -File $($MyInvocation.MyCommand.Path)"
-    foreach ($kv in $PSBoundParameters) {
-        $c += " $($kv.Key) $($kv.Value)"
-    }
-    ./PSubShell.ps1 -NoProfile -Command $c
+    ./PSubShell.ps1 -NoProfile -Command "Invoke-Build" -Parameters $PSBoundParameters
     return
 }
 
