@@ -45,10 +45,7 @@ Param(
     [string]$Command,
 
     [Parameter(ParameterSetName = 'EnterShell', Position = 1)]
-    [hashtable]$Parameters,
-
-    [Parameter(ParameterSetName = 'Initialize')]
-    [switch]$Initialize,
+    [hashtable]$Parameters = @{},
 
     [Parameter(ParameterSetName = 'EnterShell')]
     [switch]$NoProfile,
@@ -56,128 +53,147 @@ Param(
     [Parameter(ParameterSetName = 'EnterShell')]
     [switch]$NoExit,
 
-    [Parameter(ParameterSetName = 'Update')]
-    [switch]$Update,
+    [Parameter(ParameterSetName = 'Initialize', Mandatory)]
+    [switch]$Initialize,
 
-    [Parameter(ParameterSetName = 'AddResource')]
+    [Parameter(ParameterSetName = 'Initialize')]
+    [switch]$Isolated,
+
+    [Parameter(ParameterSetName = 'Initialize')]
+    [switch]$InvokeBuild,
+
+    [Parameter(ParameterSetName = 'Apply', Mandatory)]
+    [switch]$Apply,
+
+    [Parameter(ParameterSetName = 'AddResource', Mandatory)]
     [string]$AddResource,
-
-    [Parameter(ParameterSetName = 'RemoveResource')]
-    [string]$RemoveResource,
 
     [Parameter(ParameterSetName = 'AddResource')]
     [string]$Version,
 
     [Parameter(ParameterSetName = 'AddResource')]
-    [string[]]$Repository,
-
-    [Parameter(ParameterSetName = 'AddResource')]
     [switch]$Prerelease,
 
     [Parameter(ParameterSetName = 'AddResource')]
-    [switch]$TrustRepository,
+    [string]$Repository,
 
-    [Parameter(ParameterSetName = 'CreateBuildScript')]
-    [switch]$CreateBuildScript,
+    [Parameter(ParameterSetName = 'RemoveResource')]
+    [string]$RemoveResource,
 
-    [Parameter(ParameterSetName = 'CreateBuildScript', Position = 1)]
-    [string]$Path = (Join-Path $PSScriptRoot 'build.ps1'),
-
-    [Parameter(ParameterSetName = 'CreateBuildScript')]
-    [switch]$Force
+    [Parameter(ParameterSetName = 'Update', Mandatory)]
+    [switch]$Update
 )
 
-$PSubShell = @{
-    Path = Join-Path $PSScriptRoot '.psubshell'
-    DepsFile = Join-Path $PSScriptRoot '.psubshell.deps.json'
-    LockFile = Join-Path $PSScriptRoot '.psubshell.lock.json'
-}
-$PSubShell.Deps = (Get-Content $PSubShell.DepsFile -ErrorAction SilentlyContinue |
-        ConvertFrom-Json -AsHashtable) ?? @{ }
-$PSubShell.Locks = (Get-Content $PSubShell.LockFile -ErrorAction SilentlyContinue |
-        ConvertFrom-Json -AsHashtable) ?? @{ }
-
-function script:GetParameters([hashtable]$Given, [string[]]$Include, [string[]]$Exclude) {
-    $parms = @{}
-    foreach ($kv in $Given.GetEnumerator()) {
-        if ((-not $Include) -or ($Include -contains $kv.Key)) {
-            if ((-not $Exclude) -or (-not ($Exclude -contains $kv.Key))) {
-                $parms.Add($kv.Key, $kv.Value)
-            }
+for ($path = Get-Location; $path; $path = Split-Path $path) {
+    if ($Initialize -or (Test-Path (Join-Path $path '.psubshell.deps.json'))) {
+        $PSubShell = @{
+            Path = $path
+            DepsFile = Join-Path $path '.psubshell.deps.json'
+            LockFile = Join-Path $path '.psubshell.lock.json'
         }
+        $PSubShell.Deps = (Get-Content $PSubShell.DepsFile -ErrorAction SilentlyContinue |
+                ConvertFrom-Json -AsHashtable) ?? @{ }
+        $PSubShell.Locks = (Get-Content $PSubShell.LockFile -ErrorAction SilentlyContinue |
+                ConvertFrom-Json -AsHashtable) ?? @{ }
+        break
     }
-    $parms
+}
+
+if (-not $PSubShell) {
+    Write-Error 'No PSubShell initialized.'
+    return
 }
 
 switch ($PSCmdlet.ParameterSetName) {
+    'Initialize' {
+        if ((-not $PSBoundParameters.ContainsKey('Isolated')) -and $InvokeBuild) {
+            $Isolated = $True
+        }
+        if ($ISolated) {
+            Save-PSResource -Name PSubShell -Path . -IncludeXml -WarningAction SilentlyContinue
+            Remove-Item PSubShell_InstalledScriptInfo.xml
+        }
+        if ($InvokeBuild) {
+            $resource = Find-PSResource InvokeBuild -ErrorAction Stop
+            $PSubShell.Deps.InvokeBuild = @{ Type = $resource.Type.ToString() }
+            $PSubShell.Locks.InvokeBuild = @{ Type = $resource.Type.ToString(); Version = $resource.Version.ToString() }
+            if ($Isolated) {
+                Set-Content -Path 'build.ps1' -Value @'
+param(
+    [Parameter(Position = 0)]
+    [ValidateSet('?', '.')]
+    [string[]]$Tasks = '.'
+)
+
+if ($MyInvocation.ScriptName -notlike '*Invoke-Build.ps1') {
+    ./PSubShell.ps1 -NoProfile -Command "Invoke-Build $Tasks $PSCommandPath" -Parameters $PSBoundParameters
+    return
+}
+
+task . { Write-Build Green 'Hello world!' }
+'@
+            }
+            else {
+                Set-Content -Path 'build.ps1' -Value @'
+param(
+    [Parameter(Position = 0)]
+    [ValidateSet('?', '.')]
+    [string[]]$Tasks = '.'
+)
+
+if ($MyInvocation.ScriptName -notlike '*Invoke-Build.ps1') {
+    PSubShell -NoProfile -Command "Invoke-Build $Tasks $PSCommandPath" -Parameters $PSBoundParameters
+    return
+}
+
+task . { Write-Build Green 'Hello world!' }
+'@
+            }
+        }
+        ConvertTo-Json $PSubShell.Deps | Set-Content $PSubShell.DepsFile
+        ConvertTo-Json $PSubShell.Locks | Set-Content $PSubShell.LockFile
+        return
+    }
     'EnterShell' {
         if ($global:PSubShellInstance -eq $PSubShell.Path) {
             Write-Error 'Cannot reenter the same PSubShell.'
             return
         }
-        $script = Join-Path ([IO.Path]::GetTempPath()) ((Get-Item .).Name + '.ps1')
-        Set-Content $script @"
-Set-Variable -Name OldPSubShellErrorAction -Value `$ErrorActionPreference -Scope Global
-`$ErrorActionPreference = 'SilentlyContinue'
-$PSCommandPath -Initialize
+
+        $script = Join-Path ([System.IO.Path]::GetTempPath()) "tmp$((New-Guid) -replace '-','').ps1"
+        try {
+            Set-Content -Path $script -Value @"
+`$global:PSubShellInstance = '$($PSubShell.Path)'
+Set-Alias -Name PSubShell -Value $($MyInvocation.MyCommand.Path)
+$PSCommandPath -Apply
 $Command $($Parameters.GetEnumerator() | ForEach-Object { "$($_.Key) $($_.Value)" } | Join-String ' ')
-`$PSubShellInstance = '$PSubShell.Path'
-`$ErrorActionPreference = `$OldPSubShellErrorAction
-Remove-Variable -Name Old -Scope Global
 "@
-        Invoke-Expression "pwsh -Interactive $(((-not $Command) -or $NoExit) ? '-NoExit' : '') $($NoProfile ? '-NoProfile' : '') -File $script"
-    }
-
-    'Initialize' {
-        Write-Host 'Initializing PSubShell...'
-        $env:PATH = (@($PSubShell.Path) + (
-                $env:PATH -split [IO.Path]::PathSeparator |
-                    Where-Object { $_ -ne "$PSubShell.Path" }
-            )) -join [IO.Path]::PathSeparator
-        $env:PSModulePath = (@($PSubShell.Path) + (
-                $env:PSModulePath -split [IO.Path]::PathSeparator |
-                    Where-Object { $_ -ne "$PSubShell.Path" }
-            )) -join [IO.Path]::PathSeparator
-
-        foreach ($kv in $PSubShell.Deps.GetEnumerator()) {
-            $name = $kv.Key
-            $type = $kv.Type
-            $parms = GetParameters $kv.Value -Exclude 'Type', 'Version'
-            $version = $PSubShell.Locks.$name.Version
-            $resource = Find-PSResource -Name $name -Version $version `
-                -ErrorAction SilentlyContinue @parms
-            if ($type -eq 'Package') {
-                $path = Join-Path $PSubShell.Path $name -AdditionalChildPath $version
-                if (-not (Test-Path $path)) {
-                    Save-PSResource -Name $name -Version $version -ErrorAction Continue `
-                        -Path $PSSubShell.Path @parms
-                }
-                $toolsPath = Join-Path $path 'tools'
-                if (Test-Path $toolsPath) {
-                    $env:PATH = (@($toolsPath) + (
-                            $env:PATH -split [IO.Path]::PathSeparator |
-                                Where-Object { $_ -ne "$toolsPath" }
-                        )) -join [IO.Path]::PathSeparator
-                }
-            }
-            else {
-            }
+            #Get-Content $script
+            Invoke-Expression "pwsh -Interactive $(((-not $Command) -or $NoExit) ? '-NoExit' : '') $($NoProfile ? '-NoProfile' : '') -File $script"
+        }
+        finally {
+            Remove-Item -Path $script -Force -ErrorAction SilentlyContinue
         }
     }
 
     'AddResource' {
-        $name = $AddResource
-        $parms = GetParameters $PSBoundParameters -Exclude 'AddResource'
-        $resource = Find-PSResource -Name $name -ErrorAction Stop @parms |
+        $parms = @{}
+        foreach ($parm in $PSBoundParameters.Keys) {
+            if ($parm -ne 'AddResource') {
+                $parms.Add($parm, $PSBoundParameters.$parm)
+            }
+        }
+        $resource = Find-PSResource -Name $AddResource -ErrorAction SilentlyContinue @parms |
             Sort-Object -Property Version -Descending |
             Select-Object -First 1
         if (-not $resource) {
-            Write-Error "Unable to find resource '$Name'."
+            Write-Error "Unable to find resource '$AddResource'."
             return
         }
-        $parms.Type = $resource.Type.ToString() ?? 'Package'
-        $PSubShell.Deps.$name = $parms
-        $PSubShell.Locks.$name = @{
+        $PSubShell.Deps.$AddResource = @{
+            Type = $resource.Type.ToString() ?? 'Package'
+        } + $parms
+        $PSubShell.Locks.$AddResource = @{
             Type = $resource.Type.ToString() ?? 'Package'
             Version = $resource.Version.ToString()
         }
@@ -186,16 +202,20 @@ Remove-Variable -Name Old -Scope Global
     }
 
     'RemoveResource' {
-        $PSubShell.Deps.Remove($RemoveResource)
-        $PSubShell.Locks.Remove($RemoveResource)
+        $PSubShell.DepsFile.Remove($RemoveResource)
+        $PSubShell.LockFile.Remove($RemoveResource)
         ConvertTo-Json $PSubShell.Deps | Set-Content $PSubShell.DepsFile
         ConvertTo-Json $PSubShell.Locks | Set-Content $PSubShell.LockFile
     }
 
     'Update' {
-        foreach ($kv in $PSubShell.Deps.GetEnumerator()) {
-            $name = $kv.Key
-            $parms = $kv.Value
+        foreach ($name in $PSubShell.Deps.Keys) {
+            $parms = @{ }
+            foreach ($parm in $PSubShell.Deps.$resource) {
+                if ($parm -ne 'Type') {
+                    $parms.Add($parm, $PSubShell.Deps.$name.$parm)
+                }
+            }
             $resource = Find-PSResource -Name $name -ErrorAction SilentlyContinue @parms |
                 Sort-Object -Property Version -Descending |
                 Select-Object -First 1
@@ -207,25 +227,54 @@ Remove-Variable -Name Old -Scope Global
         ConvertTo-Json $PSubShell.Locks | Set-Content $PSubShell.LockFile
     }
 
-    'CreateBuildScript' {
-        if ((-not $Force) -and (Test-Path $Path)) {
-            Write-Error "File '$Path' already exists. Use -Force to overwrite."
-            return
+    'Apply' {
+        Write-Host 'Applying PSubShell...'
+        $psubshellpath = Join-Path $PSubShell.Path '.psubshell'
+        foreach ($resource in $PSubShell.Locks.Keys) {
+            New-Item -Path $psubshellpath -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
+            switch ($PSubShell.Locks.$resource.Type) {
+                'Script' {
+                    $resourcePath = Join-Path $psubshellpath "$resource.ps1"
+                    $found = $false
+                    if (Test-Path $resourcePath) {
+                        $info = Get-PSScriptFileInfo -Path $resourcePath
+                        if ($info.Version -eq $PSubShell.Locks.$resource.Version) {
+                            $found = $true
+                        }
+                    }
+                    if (-not $found) {
+                        Remove-Item -Path $resourcePath -Force -ErrorAction SilentlyContinue
+                        Save-PSResource -Name $resource -Version $PSubShell.Locks.$resource.Version `
+                            -Path $psubshellpath -IncludeXml -WarningAction SilentlyContinue
+                    }
+                    Set-Alias -Name $resource -Value $resourcePath -Scope Global
+                    Write-Host "Set-Alias -Name $resource -Value $resourcePath"
+                }
+                'Module' {
+                    $resourcePath = Join-Path $psubshellpath $resource -AdditionalChildPath $PSubShell.Locks.$resource.Version
+                    if (-not (Test-Path $resourcePath)) {
+                        Remove-Item -Path (Join-Path $psubshellpath $resource) -Force -ErrorAction SilentlyContinue
+                        Save-PSResource -Name $resource -Version $PSubShell.Locks.$resource.Version `
+                            -Path $psubshellpath -IncludeXml -WarningAction SilentlyContinue
+                    }
+                    Import-Module (Join-Path $psubshellpath $resource) -Force
+                }
+                'Package' {
+                    $resourcePath = Join-Path $psubshellpath $resource -AdditionalChildPath $PSubShell.Locks.$resource.Version
+                    if (-not (Test-Path $resourcePath)) {
+                        Remove-Item -Path (Join-Path $psubshellpath $resource) -Force -ErrorAction SilentlyContinue
+                        Save-PSResource -Name $resource -Version $PSubShell.Locks.$resource.Version `
+                            -Path $psubshellpath -IncludeXml -WarningAction SilentlyContinue
+                    }
+                    $tools = Join-Path $resourcePath 'tools'
+                    if (Test-Path $tools) {
+                        $env:PATH = (@($tools) + (
+                                $env:PATH -split [IO.Path]::PathSeparator |
+                                    Where-Object { $_ -ne $tools }
+                            )) -join [IO.Path]::PathSeparator
+                    }
+                }
+            }
         }
-
-        Set-Content -Path $Path -Value @'
-param(
-    [Parameter(Position = 0)]
-    [ValidateSet('?', '.')]
-    [string[]]$Tasks
-)
-
-if ($MyInvocation.ScriptName -notlike '*Invoke-Build.ps1') {
-    ./PSubShell.ps1 -NoProfile -Command "Invoke-Build" -Parameters $PSBoundParameters
-    return
-}
-
-task . { Write-Build Green 'Hello world!' }
-'@        
     }
 }
