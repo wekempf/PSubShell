@@ -44,7 +44,7 @@ Param(
     [Parameter(ParameterSetName = 'EnterShell', Position = 0)]
     [string]$Command,
 
-    [Parameter(ParameterSetName = 'EnterShell', Position = 1)]
+    [Parameter(ParameterSetName = 'EnterShell')]
     [hashtable]$Parameters = @{},
 
     [Parameter(ParameterSetName = 'EnterShell')]
@@ -81,18 +81,33 @@ Param(
     [string]$RemoveResource,
 
     [Parameter(ParameterSetName = 'Update', Mandatory)]
-    [switch]$Update
+    [switch]$Update,
+
+    [Parameter(ParameterSetName = 'Configure', Mandatory)]
+    [switch]$Configure,
+
+    [Parameter(ParameterSetName = 'Configure')]
+    [string[]]$AddPath,
+
+    [Parameter(ParameterSetName = 'Configure')]
+    [string[]]$AddModulePath,
+
+    [Parameter(ParameterSetName = 'Configure')]
+    [hashtable]$AddVariable,
+
+    [Parameter(ParameterSetName = 'Configure')]
+    [hashtable]$AddEnvironmentVariable
 )
 
 for ($path = Get-Location; $path; $path = Split-Path $path) {
-    if ($Initialize -or (Test-Path (Join-Path $path '.psubshell.deps.json'))) {
+    if ($Initialize -or (Test-Path (Join-Path $path '.psubshell.json'))) {
         $PSubShell = @{
             Path = $path
-            DepsFile = Join-Path $path '.psubshell.deps.json'
+            ConfigFile = Join-Path $path '.psubshell.json'
             LockFile = Join-Path $path '.psubshell.lock.json'
         }
-        $PSubShell.Deps = (Get-Content $PSubShell.DepsFile -ErrorAction SilentlyContinue |
-                ConvertFrom-Json -AsHashtable) ?? @{ }
+        $PSubShell.Config = (Get-Content $PSubShell.ConfigFile -ErrorAction SilentlyContinue |
+                ConvertFrom-Json -AsHashtable) ?? @{ Resources = @{ } }
         $PSubShell.Locks = (Get-Content $PSubShell.LockFile -ErrorAction SilentlyContinue |
                 ConvertFrom-Json -AsHashtable) ?? @{ }
         break
@@ -115,7 +130,7 @@ switch ($PSCmdlet.ParameterSetName) {
         }
         if ($InvokeBuild) {
             $resource = Find-PSResource InvokeBuild -ErrorAction Stop
-            $PSubShell.Deps.InvokeBuild = @{ Type = $resource.Type.ToString() }
+            $PSubShell.Config.Resources.InvokeBuild = @{ Type = $resource.Type.ToString() }
             $PSubShell.Locks.InvokeBuild = @{ Type = $resource.Type.ToString(); Version = $resource.Version.ToString() }
             if ($Isolated) {
                 Set-Content -Path 'build.ps1' -Value @'
@@ -150,7 +165,7 @@ task . { Write-Build Green 'Hello world!' }
 '@
             }
         }
-        ConvertTo-Json $PSubShell.Deps | Set-Content $PSubShell.DepsFile
+        ConvertTo-Json $PSubShell.Config | Set-Content $PSubShell.ConfigFile
         ConvertTo-Json $PSubShell.Locks | Set-Content $PSubShell.LockFile
         return
     }
@@ -180,7 +195,12 @@ $Command $($Parameters.GetEnumerator() | ForEach-Object { "$($_.Key) $($_.Value)
         $parms = @{}
         foreach ($parm in $PSBoundParameters.Keys) {
             if ($parm -ne 'AddResource') {
-                $parms.Add($parm, $PSBoundParameters.$parm)
+                if ($PSBoundParameters.$parm -is [switch]) {
+                    $parms.Add($parm, [bool]$PSBoundParameters.$parm)
+                }
+                else {
+                    $parms.Add($parm, $PSBoundParameters.$parm)
+                }
             }
         }
         $resource = Find-PSResource -Name $AddResource -ErrorAction SilentlyContinue @parms |
@@ -190,30 +210,34 @@ $Command $($Parameters.GetEnumerator() | ForEach-Object { "$($_.Key) $($_.Value)
             Write-Error "Unable to find resource '$AddResource'."
             return
         }
-        $PSubShell.Deps.$AddResource = @{
-            Type = $resource.Type.ToString() ?? 'Package'
+        $type = $resource.Type.ToString()
+        if ((-not $type) -or ($type -eq 'None')) {
+            $type = 'Package'
+        }
+        $PSubShell.Config.Resources.$AddResource = @{
+            Type = $type
         } + $parms
         $PSubShell.Locks.$AddResource = @{
-            Type = $resource.Type.ToString() ?? 'Package'
+            Type = $type
             Version = $resource.Version.ToString()
         }
-        ConvertTo-Json $PSubShell.Deps | Set-Content $PSubShell.DepsFile
+        ConvertTo-Json $PSubShell.Config | Set-Content $PSubShell.ConfigFile
         ConvertTo-Json $PSubShell.Locks | Set-Content $PSubShell.LockFile
     }
 
     'RemoveResource' {
-        $PSubShell.DepsFile.Remove($RemoveResource)
-        $PSubShell.LockFile.Remove($RemoveResource)
-        ConvertTo-Json $PSubShell.Deps | Set-Content $PSubShell.DepsFile
+        if ($PSubShell.Config.Resources.$RemoveResource) { $PSubShell.Config.Resources.Remove($RemoveResource) }
+        if ($PSubShell.Locks.$RemoveResource) { $PSubShell.Locks.Remove($RemoveResource) }
+        ConvertTo-Json $PSubShell.Config | Set-Content $PSubShell.ConfigFile
         ConvertTo-Json $PSubShell.Locks | Set-Content $PSubShell.LockFile
     }
 
     'Update' {
-        foreach ($name in $PSubShell.Deps.Keys) {
+        foreach ($name in $PSubShell.Config.Resources.Keys) {
             $parms = @{ }
-            foreach ($parm in $PSubShell.Deps.$resource) {
+            foreach ($parm in $PSubShell.Config.Resources.$resource) {
                 if ($parm -ne 'Type') {
-                    $parms.Add($parm, $PSubShell.Deps.$name.$parm)
+                    $parms.Add($parm, $PSubShell.Config.Resources.$name.$parm)
                 }
             }
             $resource = Find-PSResource -Name $name -ErrorAction SilentlyContinue @parms |
@@ -227,9 +251,103 @@ $Command $($Parameters.GetEnumerator() | ForEach-Object { "$($_.Key) $($_.Value)
         ConvertTo-Json $PSubShell.Locks | Set-Content $PSubShell.LockFile
     }
 
+    'Configure' {
+        $updated = $false
+        if ($AddPath) {
+            if (-not $PSubShell.Config.ContainsKey('Path')) {
+                $PSubShell.Config.Path = @()
+            }
+            $fqpWarning = $false
+            foreach ($path in @($AddPath)) {
+                if ([System.IO.Path]::IsPathFullyQualified($path)) {
+                    Write-Warning "Adding fully qualified path '$path'."
+                    $fqpWarning = $true
+                }
+            }
+            if ($fqpWarning) {
+                Write-Warning 'Adding fully qualified paths is not recommended.'
+            }
+            $PSubShell.Config.Path += @($AddPath)
+            $updated = $true
+        }
+        if ($AddModulePath) {
+            if (-not $PSubShell.Config.ContainsKey('ModulePath')) {
+                $PSubShell.Config.ModulePath = @()
+            }
+            $fqpWarning = $false
+            foreach ($path in @($AddModulePath)) {
+                if ([System.IO.Path]::IsPathFullyQualified($path)) {
+                    Write-Warning "Adding fully qualified module path '$path'."
+                    $fqpWarning = $true
+                }
+            }
+            if ($fqpWarning) {
+                Write-Warning 'Adding fully qualified paths is not recommended.'
+            }
+            $PSubShell.Config.ModulePath += @($AddPath)
+            $updated = $true
+        }
+        if ($AddVariable) {
+            if (-not $PSubShell.Config.ContainsKey('Variables')) {
+                $PSubShell.Config.Variables = @{}
+            }
+            foreach ($key in $AddVariable.Keys) {
+                $PSubShell.Config.Variables.$key = $AddVariable.$key
+            }
+            $updated = $true
+        }
+        if ($AddEnvironmentVariable) {
+            if (-not $PSubShell.Config.ContainsKey('EnvironmentVariables')) {
+                $PSubShell.Config.EnvironmentVariables = @{}
+            }
+            foreach ($key in $AddEnvironmentVariable.Keys) {
+                $PSubShell.Config.EnvironmentVariables.$key = $AddEnvironmentVariable.$key
+            }
+            $updated = $true
+        }
+        if ($updated) {
+            ConvertTo-Json $PSubShell.Config | Set-Content $PSubShell.ConfigFile
+        }
+        else {
+            Write-Warning 'No configuration changes made.'
+        }
+    }
+
     'Apply' {
         Write-Host 'Applying PSubShell...'
         $psubshellpath = Join-Path $PSubShell.Path '.psubshell'
+        $cpath = @($PSubShell.Config.Path)
+        [Array]::Reverse($cpath)
+        foreach ($path in $cpath) {
+            if (-not ([IO.Path]::IsPathRooted($path))) {
+                $path = Join-Path $PSubShell.Path $path
+            }
+            $path = Join-Path $path '.'
+            $path = [IO.Path]::GetFullPath($path)
+            $existingPaths = $env:PATH -split [IO.Path]::PathSeparator
+            if (-not ($existingPaths -contains $path)) {
+                $env:PATH = $path + [IO.Path]::PathSeparator + $env:PATH
+            }
+        }
+        $cpath = @($PSubShell.Config.ModulePath)
+        [Array]::Reverse($cpath)
+        foreach ($path in $cpath) {
+            if (-not ([IO.Path]::IsPathRooted($path))) {
+                $path = Join-Path $PSubShell.Path $path
+            }
+            $path = Join-Path $path '.'
+            $path = [IO.Path]::GetFullPath($path)
+            $existingPaths = $env:PSModulePath -split [IO.Path]::PathSeparator
+            if (-not ($existingPaths -contains $path)) {
+                $env:PSModulePath = $path + [IO.Path]::PathSeparator + $env:PSModulePath
+            }
+        }
+        foreach ($key in $PSubShell.Config.Variables.Keys) {
+            Set-Variable -Name $key -Value $PSubShell.Config.Variables.$key -Scope Global
+        }
+        foreach ($key in $PSubShell.Config.EnvironmentVariables.Keys) {
+            Set-Item -Path "env:$key" -Value $PSubShell.Config.EnvironmentVariables.$key
+        }
         foreach ($resource in $PSubShell.Locks.Keys) {
             New-Item -Path $psubshellpath -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
             switch ($PSubShell.Locks.$resource.Type) {

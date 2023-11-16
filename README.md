@@ -1,112 +1,103 @@
-# PSubShell
+# What is PSubShell
 
-`PSubShell` is a PowerShell **script** used to manage local (to a directory) module, script and package dependencies and to create subshells utilizing those dependencies. It's initial design was for use in build scripts (using InvokeBuild, PSake or other build scripts), allowing a script to run without the need to install tools globally (dependency isolation). It has usage scenarios broader than this, for instance to test out new modules without effecting your global environment.
+`PSubShell` (the `P` is silent, so pronounced "subshell") is a PowerShell **script** that enters a subshell with local resources, similar in nature to a Python virtual environment (venv).
 
-## Quick Usage
+## What does that mean in layman's terms?
 
-From a directory in which you want to run a `PSubShell`.
-
-```powershell
-PS> Save-Script PSubShell
-PS> ./PSubShell.ps1 -AddModule InvokeBuild
-PS> ./PSubShell.ps1 -CreateBuildScript
-PS> ./build.ps1
-```
-
-## Why a script?
-
-`PSubShell` is a PowerShell script, not a module. This is in furtherance of the dependency isolation that is the core of it's design. Rather than being installed into the global environment, it's saved into the local environment. For build scripts this means that the `PSubShell.ps1` is saved alongside the build script and committed to source control. Consumers of the project now can run your build script without having to install any dependencies, including `PSubShell` on their machines.
-
-That said, there are other uses for `PSubShell` and if you'd rather have access to it from anywhere on your machine, just save the script to a directory in your `$env:PATH`.
-
-## Usage
-
-`PSubShell` has a lot of parameter set variants, each designed for a specific operation.
-
-### Entering a `PSubShell`
+A subshell is a shell started from another shell, and isolates environmental changes to that instance.
 
 ```powershell
-PSubShell.ps1 [[-Command] <Object>] [-NoProfile] [-NoExit]
+PS> $Foo
+PS> Get-Location
+
+Path
+----
+C:\workspace
+
+PS> PSubShell -Initialize
+PS> PSubShell
+PowerShell 7.3.9
+PS> New-Item scratch -ItemType Directory
+
+    Directory: C:\workspace
+
+Mode                 LastWriteTime         Length Name
+----                 -------------         ------ ----
+d----          11/15/2023  5:36 PM                scratch
+
+PS> Set-Location scratch
+PS> $Foo = 'Bar'
+PS> $Foo
+Bar
+PS> Get-Location
+
+Path
+----
+C:\workspace\scratch
+
+PS> exit
+PS> $Foo
+PS> Get-Location
+
+Path
+----
+C:\workspace
+
+PS> Get-ChildItem
+
+    Directory: C:\workspace
+
+Mode                 LastWriteTime         Length Name
+----                 -------------         ------ ----
+d----          11/15/2023  5:36 PM                scratch
+-a---          11/15/2023  5:35 PM              4 .psubshell.deps.json
+-a---          11/15/2023  5:35 PM              4 .psubshell.lock.json
+PS>
 ```
 
-The default parameter set allows you to start a new subshell. When this subshell is entered the configured modules, scripts and packages are made available. An optional `Command` can be specified to be run. If a `Command` is specified, by default it is run in the subshell and then the subshell is exited. If you want to remain in the subshell after running the command, provide the `NoExit` switch as well. Commands can be specified either as a string or as a `[ScriptBlock]`.
+Note how changing the location and setting a variable inside the subshell had no effect after you exited to the outer shell, but changes you made to disk did. This is how a subshell works. The majority of you are now thinking "but that's what pwsh does!". This is correct. If you leave the `PSubShell -Initialize` command out and used `pwsh` instead of `PSubShell` you'd have gotten the exact same behavior. So why `PSubShell`?
 
-By default profile scripts are also run when entering the subshell. This can be disabled by supplying the `NoProfile` switch.
+## Resource isolation
 
-### Initializing the Environment
+`PSubShell` allows you to "install" resources (modules, scripts and packages) "locally", meaning in the directory in which you ran `PSubShell -Initialize`. That's what the `.psubshell.deps.json` and `.psubshell.lock.json` (more details on these later) are all about. Let's demonstrate this by installing the `InvokeBuild` module.
 
 ```powershell
-PSubShell.ps1 [-Initialize]
+PS> Get-Command Invoke-Build
+Get-Command: The term 'Invoke-Build' is not recognized as a name of a cmdlet, function, script file, or executable program.
+Check the spelling of the name, or if a path was included, verify that the path is correct and try again.
+PS> PSubShell -AddResource InvokeBuild
+PowerShell 7.3.9
+PS> Get-Command Invoke-Build
+
+CommandType     Name                                               Version    Source
+-----------     ----                                               -------    ------
+Alias           Invoke-Build                                       5.10.4     InvokeBuild
+
+PS> exit
+PS> Get-Command Invoke-Build
+Get-Command: The term 'Invoke-Build' is not recognized as a name of a cmdlet, function, script file, or executable program.
+Check the spelling of the name, or if a path was included, verify that the path is correct and try again.
 ```
 
-The operation is intended for use by `PSubShell` itself, to make the configured modules, scripts and packages available to the current shell. You can call this yourself, just be aware it will modify the current environment.
+When we `PSubShell -AddResource InvokeBuild` it "installs" the module locally, in a `.psubshell` directory. Then when we enter a subshell with `PSubShell` it makes that module (and any other resource we add) available within that subshell. This is resource isolation.
 
-### Updating
+## Why?
+
+This makes it possible to "distribute" a "workspace" without needing to distribute any of the dependent resources. For instance, you could create a Zip archive with everything except the `.psubshell` directory and then send this Zip archive to someone else. They could then unzip the archive and enter the `PSubShell`, which would install the added resources local to where they unzipped.
+
+A more common scenario would be to "distribute" the "workspace" as a version controlled repository using Git, with everything except the `.psubshell` directory committed. If you create a build script using a tool like `InvokeBuild` this script can now work without the need for having any dependencies installed locally. In fact, while there are plenty of other usages, this is such a common one that there's built-in support via `PSubShell -Initialize -InvokeBuild` which not only creates the environment, but also adds `InvokeBuild` as a dependency and provides a `build.ps1` script that bootstraps itself to run within the `PSubShell`.
 
 ```powershell
-PSubShell.ps1 [-Update]
+param(
+    [Parameter(Position = 0)]
+    [ValidateSet('?', '.')]
+    [string[]]$Tasks = '.'
+)
+
+if ($MyInvocation.ScriptName -notlike '*Invoke-Build.ps1') {
+    ./PSubShell.ps1 -NoProfile -Command "Invoke-Build $Tasks $PSCommandPath" -Parameters $PSBoundParameters
+    return
+}
+
+task . { Write-Build Green 'Hello world!' }
 ```
-
-This updates the versions of all configured module, script and package dependencies to use the latest available. Note that his obeys the constraints originally supplied when adding the dependency. If you want to update the constraints, use one of the Add operations instead.
-
-### AddModule
-
-```powershell
-PSubShell.ps1 [-AddModule] [-Name] <String> [-MinimumVersion <String>] [-MaximumVersion <String>] [-RequiredVersion <String>] [-Repository <String[]>] [-AllowPrerelease] [-AcceptLicense]
-```
-
-Adds a module to the `PSubShell` configuration. Modules are imported when a `PSubShell` is entered.
-
-### RemoveModule
-
-```powershell
-PSubShell.ps1 [-RemoveModule] [-Name] <String>
-```
-
-Removes a module from the `PSubShell` configuration.
-
-### AddScript
-
-```powershell
-PSubShell.ps1 [-AddScript] [-Name] <String> [-MinimumVersion <String>] [-MaximumVersion <String>] [-RequiredVersion <String>] [-Repository <String[]>] [-AllowPrerelease] [-AcceptLicense]
-```
-
-Adds a script to the `PSubShell` configuration. Aliases with the same name (sans the `.ps1` extension) are created when a `PSubShell` is entered. For instance if you add a script `Get-MyLocation` you will be able to directly execute the script with (surprise) `Get-MyLocation`. It also works to dot source the script using the alias. For instance if you add a script to `MyInvokeBuildTasks` you can dot source it in your `build.ps1` with `. MyInvokeBuildTasks`.
-
-### RemoveScript
-
-```powershell
-PSubShell.ps1 [-RemoveScript] [-Name] <String>
-```
-
-Removes a script from the `PSubShell` configuration.
-
-### AddPackage
-
-```powershell
-PSubShell.ps1 [-AddPackage] [-Name] <String> [-MinimumVersion <String>] [-MaximumVersion <String>] [-RequiredVersion <String>] [-Repository <String[]>] [-AllowPrerelease] [-AcceptLicense]
-```
-
-Adds a package to the `PSubShell`. If the package contains a `tools` directory (the primary purpose for this operation) then that directory is added to the `$env:PATH` when the `PSubShell` is entered.
-
-### RemovePackage
-
-```powershell
-PSubShell.ps1 [-RemovePackage] [-Name] <String>
-```
-
-Removes a package from the `PSubShell` configuration.
-
-### CreateBuildScript
-
-```powershell
-PSubShell.ps1 [-CreateBuildScript] [[-Path] <String>] [-Force]
-```
-
-Creates a new `build.ps1` script that uses `PSubShell.ps1` to call `Invoke-Build` recursively using the `build.ps1` script. For this to work you should also `./PSubShell.ps1 -AddModule InvokeBuild` to install `InvokeBuild` in the `PSubShell` used. Committing `PSubShell.ps1` and `build.ps1` would be all that's necessary for users to run the build script, without having any requirements for having `InvokeBuild` (or other dependencies you install in the `PSubShell`) installed.
-
-This `build.ps1` can be modified to use what ever `task`s are appropriate for your needs. Pro tip: reuse tasks and helper functions within this build script by publishing them in scripts to a repository such as `PowerShell Gallery` or `GitHub Packages`, adding them to the `PSubShell` configuration and then dot sourcing the script with the alias supplied in the `PSubShell`.
-
-### Detailed Explanation
-
-When adding modules, scripts and packages using the `PSubShell.ps1` script it adds data to the `.psubshell.lock.json` (creating it if needed) including the parameters used while adding it and the latest version of the dependency found that satisfies any constraints given. Then when a `PSubShell` is entered the dependencies specified are installed locally in the `.psubshell` directory and then made available for use within the subshell. If being used within a version control repository `PSubShell.ps1` and the `.psubshell.lock.json` should be committed, but the `.psubshell` directory should be ignored and not added.

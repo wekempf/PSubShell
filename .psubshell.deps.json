@@ -1,0 +1,10 @@
+{
+  "Z": {
+    "Repository": "PSGallery",
+    "Version": "[1.1.0, 2.0.0)",
+    "Type": "Module",
+    "Prerelease": {
+      "IsPresent": false
+    }
+  }
+}
