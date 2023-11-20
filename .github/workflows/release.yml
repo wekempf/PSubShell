@@ -55,7 +55,15 @@ jobs:
           name: PSubShell
           path: .build
 
-      # Publish script to PowerShell Gallery
+      - name: Install PSResourceGet
+        shell: pwsh
+        run: |
+          Set-PSRepository PSGallery -InstallationPolicy Trusted
+          Install-Module Microsoft.PowerShell.PSResourceGet
+          Set-PSResourceRepository PSGallery -Trusted
+          Register-PSResourceRepository NuGetGallery -Uri 'https://api.nuget.org/v3/index.json' -Trusted
+  
+        # Publish script to PowerShell Gallery
       - name: Publish script
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
