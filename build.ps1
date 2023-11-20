@@ -1,6 +1,6 @@
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('?', '.', 'version', 'clean', 'build', 'publish')]
+    [ValidateSet('?', '.', 'version', 'clean', 'test', 'build', 'publish')]
     [string[]]$Tasks,
 
     [string]$Repository = 'PSGallery',
@@ -42,14 +42,14 @@ $script:buildPath = Join-Path $PSScriptRoot '.build'
 
 task version {
     $script:version = semver (Test-ScriptFileInfo "$scriptName.ps1" |
-        Select-Object -ExpandProperty Version)
-    $script:commits = cmd { git rev-list --count main..HEAD }
+            Select-Object -ExpandProperty Version)
+    $script:commits = exec { git rev-list --count main..HEAD }
     if ($commits -ne 0) {
         $script:version = semver "$script:version-alpha$commits"
     }
     $latestVersion = semver (
-        Find-Script $scriptName -ErrorAction SilentlyContinue |
-        Select-Object -ExpandProperty Version)
+        Find-PSResource $scriptName -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty Version)
     if ($latestVersion) {
         if ($latestVersion -ge $version) {
             throw "Version $latestVersion already published. Bump version and try again."
@@ -69,6 +69,10 @@ task version {
 
 task clean {
     remove $buildPath
+}
+
+task test {
+    Invoke-Pester
 }
 
 task build version, clean, {
@@ -103,4 +107,4 @@ task publish {
     }
 }
 
-task . build
+task . version, clean, test, build

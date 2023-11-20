@@ -36,67 +36,105 @@
 <# 
 
 .DESCRIPTION 
- Creates a sub shell configured to use locally installed scripts, modules and packages. 
+Creates a sub shell configured to use locally installed scripts, modules and packages. 
 
+.SYNOPSIS
+Creates a sub shell configured to use locally installed scripts, modules and packages.
 #> 
 [CmdletBinding(DefaultParameterSetName = 'EnterShell')]
 Param(
+    # Executes the specified commands (and any parameters) as though they were
+    # typed at the PowerShell command prompt, and then exits, unless the -NoExit
+    # parameter is specified.
     [Parameter(ParameterSetName = 'EnterShell', Position = 0)]
     [string]$Command,
 
+    # A hash table of parameters to pass to the command specified by the -Command
+    # parameter. This allows for parameter splatting.
     [Parameter(ParameterSetName = 'EnterShell')]
     [hashtable]$Parameters = @{},
 
+    # Does not load the PowerShell profiles.
     [Parameter(ParameterSetName = 'EnterShell')]
     [switch]$NoProfile,
 
+    # Does not exit the shell after running startup commands.
     [Parameter(ParameterSetName = 'EnterShell')]
     [switch]$NoExit,
 
+    # Hides the banner text at startup of interactive sessions.
+    [Parameter(ParameterSetName = 'EnterShell')]
+    [switch]$NoLogo,
+
+    # Initializes a directory for use with PSubShell.
     [Parameter(ParameterSetName = 'Initialize', Mandatory)]
     [switch]$Initialize,
 
+    # Includes the PSubShell.ps1 script in the initialized directory.
     [Parameter(ParameterSetName = 'Initialize')]
     [switch]$Isolated,
 
+    # Includes an InvokeBuild build.ps1 script in the initialized directory.
     [Parameter(ParameterSetName = 'Initialize')]
     [switch]$InvokeBuild,
 
+    # Applies the configured PSubShell settings to the current shell. This is
+    # done automatically when entering the subshell, but can be used to apply
+    # changes to the configuration without entering the subshell.
     [Parameter(ParameterSetName = 'Apply', Mandatory)]
     [switch]$Apply,
 
-    [Parameter(ParameterSetName = 'AddResource', Mandatory)]
-    [string]$AddResource,
+    # Installs the specified PSResource in the subshell.
+    [Parameter(ParameterSetName = 'InstallResource', Mandatory)]
+    [string]$InstallResource,
 
-    [Parameter(ParameterSetName = 'AddResource')]
+    # The version of the PSResource to install. A range can be specified.
+    [Parameter(ParameterSetName = 'InstallResource')]
     [string]$Version,
 
-    [Parameter(ParameterSetName = 'AddResource')]
+    # Allow prerelease versions of the PSResource to be installed.
+    [Parameter(ParameterSetName = 'InstallResource')]
     [switch]$Prerelease,
 
-    [Parameter(ParameterSetName = 'AddResource')]
+    # The repository to use when installing the PSResource.
+    [Parameter(ParameterSetName = 'InstallResource')]
     [string]$Repository,
 
+    # Removes the specified PSResource from the subshell.
     [Parameter(ParameterSetName = 'RemoveResource')]
     [string]$RemoveResource,
 
+    # Updates the lockfile with the latest versions of all installed PSResources.
     [Parameter(ParameterSetName = 'Update', Mandatory)]
     [switch]$Update,
 
-    [Parameter(ParameterSetName = 'Configure', Mandatory)]
-    [switch]$Configure,
-
-    [Parameter(ParameterSetName = 'Configure')]
+    # Adds the specified path to the PATH environment variable of the subshell.
+    # The path can be relative to the current directory, or fully qualified, though
+    # it's not recommended to use fully qualified paths if the subshell is to be
+    # distributed, including committed to version control systems.
+    [Parameter(ParameterSetName = 'AddPath', Mandatory)]
     [string[]]$AddPath,
 
-    [Parameter(ParameterSetName = 'Configure')]
+    # Adds the specified path to the PSModulePath environment variable of the
+    # subshell. The path can be relative to the current directory, or fully
+    # qualified, though it's not recommended to use fully qualified paths if the
+    # subshell is to be distributed, including committed to version control
+    # systems.
+    [Parameter(ParameterSetName = 'AddModulePath', Mandatory)]
     [string[]]$AddModulePath,
 
-    [Parameter(ParameterSetName = 'Configure')]
-    [hashtable]$AddVariable,
+    # Adds the specified variable to the subshell. The variable can be a
+    # PowerShell variable, or an environment variable. If an environment variable
+    # is specified, it must be prefixed with 'env:'.
+    [Parameter(ParameterSetName = 'AddVariable')]
+    [string]$AddVariable,
 
-    [Parameter(ParameterSetName = 'Configure')]
-    [hashtable]$AddEnvironmentVariable
+    # The value of the variable to add.
+    [Parameter(ParameterSetName = 'AddVariable', Position = 1)]
+    [string]$Value,
+
+    [Parameter(ParameterSetName = 'DefaultRepository', Mandatory)]
+    [string]$DefaultRepository
 )
 
 for ($path = Get-Location; $path; $path = Split-Path $path) {
@@ -184,17 +222,17 @@ $PSCommandPath -Apply
 $Command $($Parameters.GetEnumerator() | ForEach-Object { "$($_.Key) $($_.Value)" } | Join-String ' ')
 "@
             #Get-Content $script
-            Invoke-Expression "pwsh -Interactive $(((-not $Command) -or $NoExit) ? '-NoExit' : '') $($NoProfile ? '-NoProfile' : '') -File $script"
+            Invoke-Expression "pwsh -Interactive $(((-not $Command) -or $NoExit) ? '-NoExit' : '') $($NoProfile ? '-NoProfile' : '') $($NoLogo ? '-NoLogo' : '') -File $script"
         }
         finally {
             Remove-Item -Path $script -Force -ErrorAction SilentlyContinue
         }
     }
 
-    'AddResource' {
+    'InstallResource' {
         $parms = @{}
         foreach ($parm in $PSBoundParameters.Keys) {
-            if ($parm -ne 'AddResource') {
+            if ($parm -ne 'InstallResource') {
                 if ($PSBoundParameters.$parm -is [switch]) {
                     $parms.Add($parm, [bool]$PSBoundParameters.$parm)
                 }
@@ -203,21 +241,21 @@ $Command $($Parameters.GetEnumerator() | ForEach-Object { "$($_.Key) $($_.Value)
                 }
             }
         }
-        $resource = Find-PSResource -Name $AddResource -ErrorAction SilentlyContinue @parms |
+        $resource = Find-PSResource -Name $InstallResource -ErrorAction SilentlyContinue @parms |
             Sort-Object -Property Version -Descending |
             Select-Object -First 1
         if (-not $resource) {
-            Write-Error "Unable to find resource '$AddResource'."
+            Write-Error "Unable to find resource '$InstallResource'."
             return
         }
         $type = $resource.Type.ToString()
         if ((-not $type) -or ($type -eq 'None')) {
             $type = 'Package'
         }
-        $PSubShell.Config.Resources.$AddResource = @{
+        $PSubShell.Config.Resources.$InstallResource = @{
             Type = $type
         } + $parms
-        $PSubShell.Locks.$AddResource = @{
+        $PSubShell.Locks.$InstallResource = @{
             Type = $type
             Version = $resource.Version.ToString()
         }
@@ -251,66 +289,53 @@ $Command $($Parameters.GetEnumerator() | ForEach-Object { "$($_.Key) $($_.Value)
         ConvertTo-Json $PSubShell.Locks | Set-Content $PSubShell.LockFile
     }
 
-    'Configure' {
-        $updated = $false
-        if ($AddPath) {
-            if (-not $PSubShell.Config.ContainsKey('Path')) {
-                $PSubShell.Config.Path = @()
-            }
-            $fqpWarning = $false
-            foreach ($path in @($AddPath)) {
-                if ([System.IO.Path]::IsPathFullyQualified($path)) {
-                    Write-Warning "Adding fully qualified path '$path'."
-                    $fqpWarning = $true
-                }
-            }
-            if ($fqpWarning) {
-                Write-Warning 'Adding fully qualified paths is not recommended.'
-            }
-            $PSubShell.Config.Path += @($AddPath)
-            $updated = $true
+    'AddPath' {
+        if (-not $PSubShell.Config.ContainsKey('Path')) {
+            $PSubShell.Config.Path = @()
         }
-        if ($AddModulePath) {
-            if (-not $PSubShell.Config.ContainsKey('ModulePath')) {
-                $PSubShell.Config.ModulePath = @()
+        $fqpWarning = $false
+        foreach ($path in @($AddPath)) {
+            if ([System.IO.Path]::IsPathFullyQualified($path)) {
+                Write-Warning "Adding fully qualified path '$path'."
+                $fqpWarning = $true
             }
-            $fqpWarning = $false
-            foreach ($path in @($AddModulePath)) {
-                if ([System.IO.Path]::IsPathFullyQualified($path)) {
-                    Write-Warning "Adding fully qualified module path '$path'."
-                    $fqpWarning = $true
-                }
-            }
-            if ($fqpWarning) {
-                Write-Warning 'Adding fully qualified paths is not recommended.'
-            }
-            $PSubShell.Config.ModulePath += @($AddPath)
-            $updated = $true
         }
-        if ($AddVariable) {
-            if (-not $PSubShell.Config.ContainsKey('Variables')) {
-                $PSubShell.Config.Variables = @{}
-            }
-            foreach ($key in $AddVariable.Keys) {
-                $PSubShell.Config.Variables.$key = $AddVariable.$key
-            }
-            $updated = $true
+        if ($fqpWarning) {
+            Write-Warning 'Adding fully qualified paths is not recommended.'
         }
-        if ($AddEnvironmentVariable) {
-            if (-not $PSubShell.Config.ContainsKey('EnvironmentVariables')) {
-                $PSubShell.Config.EnvironmentVariables = @{}
+        $PSubShell.Config.Path += @($AddPath)
+        ConvertTo-Json $PSubShell.Config | Set-Content $PSubShell.ConfigFile
+    }
+
+    'AddModulePath' {
+        if (-not $PSubShell.Config.ContainsKey('ModulePath')) {
+            $PSubShell.Config.ModulePath = @()
+        }
+        $fqpWarning = $false
+        foreach ($path in @($AddModulePath)) {
+            if ([System.IO.Path]::IsPathFullyQualified($path)) {
+                Write-Warning "Adding fully qualified module path '$path'."
+                $fqpWarning = $true
             }
-            foreach ($key in $AddEnvironmentVariable.Keys) {
-                $PSubShell.Config.EnvironmentVariables.$key = $AddEnvironmentVariable.$key
-            }
-            $updated = $true
         }
-        if ($updated) {
-            ConvertTo-Json $PSubShell.Config | Set-Content $PSubShell.ConfigFile
+        if ($fqpWarning) {
+            Write-Warning 'Adding fully qualified paths is not recommended.'
         }
-        else {
-            Write-Warning 'No configuration changes made.'
+        $PSubShell.Config.ModulePath += @($AddModulePath)
+        ConvertTo-Json $PSubShell.Config | Set-Content $PSubShell.ConfigFile
+    }
+
+    'AddVariable' {
+        if (-not $PSubShell.Config.ContainsKey('Variables')) {
+            $PSubShell.Config.Variables = @{}
         }
+        $PSubShell.Config.Variables.$AddVariable = $Value
+        ConvertTo-Json $PSubShell.Config | Set-Content $PSubShell.ConfigFile
+    }
+
+    'DefaultRepository' {
+        $PSubShell.Config.DefaultRepository = $DefaultRepository
+        ConvertTo-Json $PSubShell.Config | Set-Content $PSubShell.ConfigFile
     }
 
     'Apply' {
@@ -343,13 +368,19 @@ $Command $($Parameters.GetEnumerator() | ForEach-Object { "$($_.Key) $($_.Value)
             }
         }
         foreach ($key in $PSubShell.Config.Variables.Keys) {
-            Set-Variable -Name $key -Value $PSubShell.Config.Variables.$key -Scope Global
+            if ($key.StartsWith('env:', 'InvariantCultureIgnoreCase')) {
+                Set-Item -Path $key -Value $PSubShell.Config.Variables.$key
+            }
+            else {
+                Set-Variable -Name $key -Value $PSubShell.Config.Variables.$key -Scope Global
+            }
         }
         foreach ($key in $PSubShell.Config.EnvironmentVariables.Keys) {
             Set-Item -Path "env:$key" -Value $PSubShell.Config.EnvironmentVariables.$key
         }
         foreach ($resource in $PSubShell.Locks.Keys) {
             New-Item -Path $psubshellpath -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
+            $Repository = $PSubShell.Config.Resources.$resource.Repository ?? $PSubShell.Config.DefaultRepository
             switch ($PSubShell.Locks.$resource.Type) {
                 'Script' {
                     $resourcePath = Join-Path $psubshellpath "$resource.ps1"
@@ -363,7 +394,7 @@ $Command $($Parameters.GetEnumerator() | ForEach-Object { "$($_.Key) $($_.Value)
                     if (-not $found) {
                         Remove-Item -Path $resourcePath -Force -ErrorAction SilentlyContinue
                         Save-PSResource -Name $resource -Version $PSubShell.Locks.$resource.Version `
-                            -Path $psubshellpath -IncludeXml -WarningAction SilentlyContinue
+                            -Path $psubshellpath -Repository:$Repository -IncludeXml -WarningAction SilentlyContinue
                     }
                     Set-Alias -Name $resource -Value $resourcePath -Scope Global
                     Write-Host "Set-Alias -Name $resource -Value $resourcePath"

@@ -2,5 +2,9 @@
   "Z": {
     "Version": "1.1.13",
     "Type": "Module"
+  },
+  "InvokeBuild": {
+    "Type": "Module",
+    "Version": "5.10.4"
   }
 }

@@ -14,7 +14,7 @@ env:
 
 jobs:
   build:
-    name: Run build.ps1 build
+    name: Run build.ps1
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,7 +24,7 @@ jobs:
       # Run the build script to create the versioned script file
       - name: Build
         run: |
-          ./build.ps1 build
+          ./build.ps1
 
       # Publish the script as an artifact, so it can be used in other jobs
       - uses: actions/upload-artifact@v3
@@ -52,11 +52,9 @@ jobs:
           path: ${{ env.BuildDirectory }}
 
       # Publish script to PowerShell Gallery
-      # Use --skip-duplicate to prevent errors if a package with the same version already exists.
-      # If you retry a failed workflow, already published packages will be skipped without error.
       - name: Publish script
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
         run: |
-          ./build.ps1 publish -Release
+          ./build.ps1 publish

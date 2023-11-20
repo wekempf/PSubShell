@@ -19,7 +19,7 @@ env:
 
 jobs:
   build:
-    name: Run build.ps1 build
+    name: Run build.ps1
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -29,7 +29,7 @@ jobs:
       # Run the build script to create the versioned script file
       - name: Build
         run: |
-          ./build.ps1 build
+          ./build.ps1
 
       # Publish the script as an artifact, so it can be used in other jobs
       - uses: actions/upload-artifact@v3

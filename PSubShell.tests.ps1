@@ -47,9 +47,9 @@ Describe '-Initialize' {
         BeforeEach $setup
         AfterEach $teardown
     
-        It 'should create deps and lock file' {
+        It 'should create config and lock file' {
             PSubShell -Initialize
-            '.psubshell.deps.json' | Should -Exist
+            '.psubshell.json' | Should -Exist
             '.psubshell.lock.json' | Should -Exist
             'PSubShell.ps1' | Should -Not -Exist
             'build.ps1' | Should -Not -Exist
@@ -57,7 +57,7 @@ Describe '-Initialize' {
 
         It 'should add PSubShell.ps1 when -Isolated' {
             PSubShell -Initialize -Isolated
-            '.psubshell.deps.json' | Should -Exist
+            '.psubshell.json' | Should -Exist
             '.psubshell.lock.json' | Should -Exist
             'PSubShell.ps1' | Should -Exist
             'build.ps1' | Should -Not -Exist
@@ -65,7 +65,7 @@ Describe '-Initialize' {
 
         It 'should add build.ps1 and PSubShell.ps1 when -InvokeBuild' {
             PSubShell -Initialize -InvokeBuild
-            '.psubshell.deps.json' | Should -Exist
+            '.psubshell.json' | Should -Exist
             '.psubshell.lock.json' | Should -Exist
             'PSubShell.ps1' | Should -Exist
             'build.ps1' | Should -Exist
@@ -73,7 +73,7 @@ Describe '-Initialize' {
 
         It 'should add build.ps1 but not PSubShell.ps1 when -InvokeBuild -Isolated:$false' {
             PSubShell -Initialize -InvokeBuild -Isolated:$False
-            '.psubshell.deps.json' | Should -Exist
+            '.psubshell.json' | Should -Exist
             '.psubshell.lock.json' | Should -Exist
             'PSubShell.ps1' | Should -Not -Exist
             'build.ps1' | Should -Exist
@@ -81,44 +81,44 @@ Describe '-Initialize' {
     }
 }
 
-Describe '-AddResource' {
+Describe '-InstallResource' {
     Context 'valid resource' {
         BeforeEach $setup
         AfterEach $teardown
     
         It 'should record parameters and type' {
             PSubShell -Initialize
-            PSubShell -AddResource posh-git -Version '[1.1.0, 2.0.0)' -Repository PSGallery -Prerelease:$false
-            $deps = Get-Content '.psubshell.deps.json' | ConvertFrom-Json -AsHashtable
-            $deps.'posh-git' | Should -Not -BeNull
-            $deps.'posh-git'.Version | Should -Be '[1.1.0, 2.0.0)'
-            $deps.'posh-git'.Repository | Should -Be 'PSGallery'
-            $deps.'posh-git'.Prerelease | Should -Be $false
-            $deps.'posh-git'.Type | Should -Be 'Module'
+            PSubShell -InstallResource posh-git -Version '[1.1.0, 2.0.0)' -Repository PSGallery -Prerelease:$false
+            $cfg = Get-Content '.psubshell.json' | ConvertFrom-Json -AsHashtable
+            $cfg.Resources.'posh-git' | Should -Not -BeNull
+            $cfg.Resources.'posh-git'.Version | Should -Be '[1.1.0, 2.0.0)'
+            $cfg.Resources.'posh-git'.Repository | Should -Be 'PSGallery'
+            $cfg.Resources.'posh-git'.Prerelease | Should -Be $false
+            $cfg.Resources.'posh-git'.Type | Should -Be 'Module'
         }
 
         It 'should record type when it is a module' {
             PSubShell -Initialize
-            PSubShell -AddResource posh-git
-            $deps = Get-Content '.psubshell.deps.json' | ConvertFrom-Json -AsHashtable
-            $deps.'posh-git' | Should -Not -BeNull
-            $deps.'posh-git'.Type | Should -Be 'Module'
+            PSubShell -InstallResource posh-git
+            $cfg = Get-Content '.psubshell.json' | ConvertFrom-Json -AsHashtable
+            $cfg.Resources.'posh-git' | Should -Not -BeNull
+            $cfg.Resources.'posh-git'.Type | Should -Be 'Module'
         }
 
         It 'should record type when it is a script' {
             PSubShell -Initialize
-            PSubShell -AddResource PSubShell
-            $deps = Get-Content '.psubshell.deps.json' | ConvertFrom-Json -AsHashtable
-            $deps.PSubShell | Should -Not -BeNull
-            $deps.PSubShell.Type | Should -Be 'Script'
+            PSubShell -InstallResource PSubShell
+            $cfg = Get-Content '.psubshell.json' | ConvertFrom-Json -AsHashtable
+            $cfg.Resources.PSubShell | Should -Not -BeNull
+            $cfg.Resources.PSubShell.Type | Should -Be 'Script'
         }
 
         It 'should record type when it is a package' {
             PSubShell -Initialize
-            PSubShell -AddResource GitVersion.CommandLine
-            $deps = Get-Content '.psubshell.deps.json' | ConvertFrom-Json -AsHashtable
-            $deps.'GitVersion.CommandLine' | Should -Not -BeNull
-            $deps.'GitVersion.CommandLine'.Type | Should -Be 'Package'
+            PSubShell -InstallResource GitVersion.CommandLine
+            $cfg = Get-Content '.psubshell.json' | ConvertFrom-Json -AsHashtable
+            $cfg.Resources.'GitVersion.CommandLine' | Should -Not -BeNull
+            $cfg.Resources.'GitVersion.CommandLine'.Type | Should -Be 'Package'
         }
     }
 }
@@ -130,10 +130,10 @@ Describe '-RemoveResource' {
     
         It 'should remove resource' {
             PSubShell -Initialize
-            PSubShell -AddResource posh-git
+            PSubShell -InstallResource posh-git
             PSubShell -RemoveResource posh-git
-            $deps = Get-Content '.psubshell.deps.json' | ConvertFrom-Json -AsHashtable
-            $deps.'posh-git' | Should -BeNull
+            $cfg = Get-Content '.psubshell.json' | ConvertFrom-Json -AsHashtable
+            $cfg.Resources.'posh-git' | Should -BeNull
         }
     }
 }
