@@ -1,7 +1,6 @@
 {
-  "modules": {
-    "InvokeBuild": {
-      "Version": "5.10.4"
-    }
+  "InvokeBuild": {
+    "Type": "Module",
+    "Version": "5.10.4"
   }
 }

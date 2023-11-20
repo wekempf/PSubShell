@@ -1,0 +1,50 @@
+name: ci build
+run-name: ${{ github.actor }} is building 🚀
+on:
+  workflow_dispatch:
+
+  pull_request:
+    branches:
+      - "*"
+    paths:
+      - "PSubShell.ps1"
+      - ".psubshell.json"
+      - ".psubshell.lock.json"
+      - "build.ps1"
+
+defaults:
+  run:
+    shell: pwsh
+
+env:
+    COMMIT_COUNT: ${{ github.event.pull_request.commits }}
+
+jobs:
+  build:
+    name: Run build.ps1
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install PSResourceGet
+        shell: pwsh
+        run: |
+          Set-PSRepository PSGallery -InstallationPolicy Trusted
+          Install-Module Microsoft.PowerShell.PSResourceGet
+          Set-PSResourceRepository PSGallery -Trusted
+          Register-PSResourceRepository NuGetGallery -Uri 'https://api.nuget.org/v3/index.json' -Trusted
+
+      # Run the build script to create the versioned script file
+      - name: Build
+        run: |
+          ./build.ps1
+
+      # Publish the script as an artifact, so it can be used in other jobs
+      - uses: actions/upload-artifact@v3
+        with:
+          name: PSubShell
+          if-no-files-found: error
+          retention-days: 7
+          path: .build/PSubShell.ps1
