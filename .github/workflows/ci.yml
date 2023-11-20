@@ -34,6 +34,7 @@ jobs:
           Set-PSRepository PSGallery -InstallationPolicy Trusted
           Install-Module Microsoft.PowerShell.PSResourceGet
           Set-PSResourceRepository PSGallery -Trusted
+          Register-PSResourceRepository NuGetGallery -Uri 'https://api.nuget.org/v3/index.json' -Trusted
 
       # Run the build script to create the versioned script file
       - name: Build

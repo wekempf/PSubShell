@@ -72,7 +72,7 @@ task clean {
 }
 
 task test {
-    Invoke-Pester
+    Invoke-Pester -ErrorAction Stop
 }
 
 task build version, clean, {
