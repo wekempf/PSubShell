@@ -273,8 +273,9 @@ $Command $($Parameters.GetEnumerator() | ForEach-Object { "$($_.Key) $($_.Value)
     'Update' {
         foreach ($name in $PSubShell.Config.Resources.Keys) {
             $parms = @{ }
-            foreach ($parm in $PSubShell.Config.Resources.$resource) {
+            foreach ($parm in $PSubShell.Config.Resources.$name.Keys) {
                 if ($parm -ne 'Type') {
+                    Write-Host $parm
                     $parms.Add($parm, $PSubShell.Config.Resources.$name.$parm)
                 }
             }
