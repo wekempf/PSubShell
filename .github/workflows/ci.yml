@@ -47,4 +47,4 @@ jobs:
           name: PSubShell
           if-no-files-found: error
           retention-days: 7
-          path: ${{ env.BuildDirectory }}/PSubShell.ps1
+          path: .build/PSubShell.ps1
