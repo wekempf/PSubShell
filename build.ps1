@@ -43,7 +43,7 @@ $script:buildPath = Join-Path $PSScriptRoot '.build'
 task version {
     $script:version = semver (Test-ScriptFileInfo "$scriptName.ps1" |
             Select-Object -ExpandProperty Version)
-    $script:commits = exec { git rev-list --count main..HEAD }
+    $script:commits = $env:COMMIT_COUNT ?? (exec { git rev-list --count main..HEAD })
     if ($commits -ne 0) {
         $script:version = semver "$script:version-alpha$commits"
     }

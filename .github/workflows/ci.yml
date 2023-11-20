@@ -8,11 +8,16 @@ on:
       - "*"
     paths:
       - "PSubShell.ps1"
+      - ".psubshell.json"
+      - ".psubshell.lock.json"
       - "build.ps1"
 
 defaults:
   run:
     shell: pwsh
+
+env:
+    COMMIT_COUNT: ${{ github.event.pull_request.commits }}
 
 jobs:
   build:
