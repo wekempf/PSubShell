@@ -28,6 +28,7 @@ jobs:
         run: |
           Set-PSRepository PSGallery -InstallationPolicy Trusted
           Install-Module Microsoft.PowerShell.PSResourceGet
+          Set-PSResourceRepository PSGallery -InstallationPolicy Trusted
 
       # Run the build script to create the versioned script file
       - name: Build
