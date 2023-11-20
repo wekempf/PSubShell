@@ -44,7 +44,7 @@ task version {
     $script:version = semver (Test-ScriptFileInfo "$scriptName.ps1" |
             Select-Object -ExpandProperty Version)
     $script:commits = $env:COMMIT_COUNT ?? (exec { git rev-list --count main..HEAD })
-    if ($commits -ne 0) {
+    if ($script:commits -ne 0) {
         $script:version = semver "$script:version-alpha$commits"
     }
     $latestVersion = semver (

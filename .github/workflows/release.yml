@@ -5,6 +5,9 @@ on:
     types:
       - published # Run the workflow when a release is published
 
+env:
+    COMMIT_COUNT: 0
+
 defaults:
   run:
     shell: pwsh
