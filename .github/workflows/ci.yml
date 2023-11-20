@@ -17,7 +17,7 @@ defaults:
     shell: pwsh
 
 env:
-    COMMIT_COUNT: 0
+    COMMIT_COUNT: ${{ github.event.pull_request.commits }}
 
 jobs:
   build:
