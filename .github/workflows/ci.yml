@@ -23,6 +23,12 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install PSResourceGet
+        shell: pwsh
+        run: |
+          Set-PSRepository PSGallery -InstallationPolicy Trusted
+          Install-Module PSResourceGet
+
       # Run the build script to create the versioned script file
       - name: Build
         run: |
