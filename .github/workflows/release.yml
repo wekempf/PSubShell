@@ -9,17 +9,20 @@ defaults:
   run:
     shell: pwsh
 
-env:
-  BuildDirectory: ${{ github.workspace }}/.build
-
 jobs:
   build:
     name: Run build.ps1
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+
+      - name: Install PSResourceGet
+        shell: pwsh
+        run: |
+          Set-PSRepository PSGallery -InstallationPolicy Trusted
+          Install-Module Microsoft.PowerShell.PSResourceGet
+          Set-PSResourceRepository PSGallery -Trusted
+          Register-PSResourceRepository NuGetGallery -Uri 'https://api.nuget.org/v3/index.json' -Trusted
 
       # Run the build script to create the versioned script file
       - name: Build
@@ -32,7 +35,7 @@ jobs:
           name: PSubShell
           if-no-files-found: error
           retention-days: 1
-          path: ${{ env.BuildDirectory }}/PSubShell.ps1
+          path: .build/PSubShell.ps1
 
   deploy:
     # Publish only when creating a GitHub Release
@@ -42,14 +45,12 @@ jobs:
     needs: [build]
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       # Download the script created in the previous job
       - uses: actions/download-artifact@v3
         with:
           name: PSubShell
-          path: ${{ env.BuildDirectory }}
+          path: .build
 
       # Publish script to PowerShell Gallery
       - name: Publish script
